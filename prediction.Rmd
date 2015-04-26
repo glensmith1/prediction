@@ -1,0 +1,114 @@
+---
+title: "Prediction Project"
+author: "Glen W Smith"
+date: "Saturday, April 25, 2015"
+output: html_document
+---
+## 1.0 Introduction
+
+#### 1.1 Abstract
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. This prediction was done using 52 predictors.
+
+#### 1.2 Environment
+```{r, echo=FALSE, message=FALSE}
+library(knitr)
+library(data.table)
+library(caret)
+```
+```{r,echo=TRUE, message=TRUE}
+sessionInfo()
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+```
+`r opts_chunk$set(cache=TRUE)`
+
+## 2.0 Data Processing
+
+#### 2.1  Load Data
+Used data set from http://groupware.les.inf.puc-rio.br/static/WLE/WearableComputing_weight_lifting_exercises_biceps_curl_variations.csv.  Removed unused or incomplete columns which leaves 51 predictors and one outcome called classe.
+```{r, echo=TRUE}
+# Load data set
+op <- options(warn = (-1))
+indata <- fread("http://groupware.les.inf.puc-rio.br/static/WLE/WearableComputing_weight_lifting_exercises_biceps_curl_variations.csv",
+                showProgress=F,
+                data.table=F)[,7:159]
+options(op)
+# Remove all charcter class columns
+indata$classe <- as.factor(indata$classe) # This is the outcome and will not be removed
+indata <- indata[, which(unlist(lapply(indata, function(x) !is.character(x))))]
+# Remove all remaining columns with NAs
+indata <- indata[, which(unlist(lapply(indata, function(x) !any(is.na(x)))))]
+# Inspect data structure
+summary(indata)
+```
+
+#### 2.2  Partion Data Into Training and Test Sets
+About 75% of the data will be put into the training set and 25% will be reserved for testing.
+```{r, echo=TRUE}
+set.seed(1001)
+# Partion data set
+inTrain <- createDataPartition(indata$classe, p=.75, list=FALSE)
+training <- indata[inTrain,]
+testing <- indata[-inTrain,]
+```
+
+Training dimensions: `r dim(training)`
+
+ Testing dimensions: `r dim(testing)`
+
+## 3.0  Prediction
+
+#### 3.1  Training
+Trained the prediction model using the Random Forest algorithm.  For reasons of timing and computing power, the training used a smaller subset of the training set and 150 trees.
+```{r, echo=TRUE}
+# Reduce training set to manageble size
+smallPart <- createDataPartition(y=training$classe, p=0.3, list=F)
+smallTrain <- training[smallPart,]
+```
+
+Reduced training set dimensions: `r dim(smallTrain)`
+
+```{r, echo=TRUE}
+# Random forest training
+myControl <- trainControl(method="boot", number=5, allowParallel=F)
+indata.RF <- train(classe ~ .,
+                   data=smallTrain,
+                   method='rf',
+                   trControl=myControl)
+```
+
+#### 3.2  Analysis
+```{r, echo=FALSE}
+indata.RF
+indata.RF$finalModel
+```
+
+#### 3.3  Testing
+Tested the model against the data set created in section 2.2
+```{r, echo=TRUE}
+predTest <- predict(indata.RF, testing)
+predVactual  <- data.frame(predTest, testing$classe)
+table(predVactual$predTest,predVactual$testing.classe)
+```
+Estimated error rate = `r nrow(predVactual[predVactual$predTest != predVactual$testing.classe,])/nrow(predVactual)`
+
+Now we apply the model against 20 predictions made in the actual test data.  Test data was from http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv.
+```{r, echo=FALSE}
+# Download and install test cases
+op <- options(warn = (-1))
+testing <- fread("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                 data.table=F)
+options(op)
+# Predicting
+predTest <- predict(indata.RF, testing)
+predTest
+dir.create("Prediction", showWarnings = FALSE)
+setwd("Prediction")
+pml_write_files(predTest)
+setwd("..")
+```
